@@ -1,0 +1,25 @@
+# verbose
+/control/verbose 1
+/control/saveHistory
+/run/verbose 0
+/run/numberOfThreads 1
+
+# Initialize kernel
+/run/initialize
+
+# GPS source settings
+/gps/particle neutron
+/gps/pos/type Point
+/gps/pos/centre 0 0 0 m
+/gps/ang/type iso
+/gps/ene/type Mono
+/gps/ene/mono 2 MeV
+
+# Visualization
+/control/execute vis.mac
+
+/tracking/storeTrajectory 0
+/run/verbose 0
+/event/verbose 0
+/process/had/rdm/thresholdForVeryLongDecayTime 1 year
+/run/printProgress 0

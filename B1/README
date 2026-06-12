@@ -1,0 +1,150 @@
+# B1: Am-242m 裂变碎片输运主模型
+
+本目录是论文《基于裂变碎片的空间核推进概念设计及可行性研究》的主计算模型。它以 Geant4 B1 示例为框架，但研究对象已经改为 Am-242m 涂层燃料颗粒中的中子诱发裂变、直接裂变碎片逃逸、磁场准直输运以及两侧弯曲出口命中统计。
+
+本目录不是原始 Geant4 B1 的水箱剂量示例，也不是完整反应堆物理、临界计算、热工水力、等离子体或工程磁体设计程序。
+
+## 研究目的
+
+该模型用于回答以下问题：
+
+- 在当前几何、源项和物理列表设置下，中子诱发裂变产生的直接裂变碎片能否从微米级 Am-242m 燃料壳层向外逃逸；
+- 逃逸碎片进入 Shape3/Shape4 两侧弯曲出口结构的事件数和命中率如何；
+- 关闭磁场、均匀磁场和准直/分叉磁场三种设置对出口进入统计有什么影响；
+- FuelShell -> Shape1 首次外向逃逸碎片的速度和能量可为后续推进性能估算提供哪些输入量。
+
+## 当前代码实现
+
+主要实现位于 `src/` 和 `include/`：
+
+- `DetectorConstruction.cc`
+  - 定义真空世界体和 Envelope；
+  - 将 Shape1 建模为活动燃料区，正常输运模式下为半径 1 m、长度 3 m 的圆柱体；
+  - 在 Shape1 内布置石墨内核和 Am-242m 金属微米级燃料壳层；
+  - 石墨内核半径为 2.0 mm，Am-242m 燃料壳层厚度为 1.0 um；
+  - Am-242m 金属密度取 13.6 g/cm3；
+  - Shape2 为 BeO 外围慢化/包覆结构，BeO 密度取 3.01 g/cm3；
+  - Shape3 和 Shape4 为两侧 90 度弯曲出口/导向结构；
+  - 通过环境变量选择无磁场、均匀磁场或准直磁场。
+
+- `PrimaryGeneratorAction.cc`
+  - 使用 `G4GeneralParticleSource`；
+  - 每个事件先由 GPS 生成主粒子，再将主顶点重写到燃料壳层中；
+  - 源项优先采样边界燃料壳层中心，若无边界壳层则退回采样全部燃料壳层中心；
+  - 具体入射粒子、能量和束流设置仍由宏文件中的 GPS 命令控制。
+
+- `MagneticCollimationField.cc`
+  - 实现自定义磁场；
+  - `off` 表示关闭磁场；
+  - `uniform` 表示默认 1.5 T 的均匀 Y 向磁场；
+  - `collimation` 表示默认 1.5 T、轴向梯度 -0.04 T/m、10 deg 分叉导向的准直场；
+  - 准直场改变的是带电裂变碎片的输运方向和出口接受率，不改变裂变释放能量。
+
+- `SteppingAction.cc`
+  - 识别 `nFission` 直接产生的核碎片；
+  - 统计直接裂变碎片初始能量；
+  - 统计 FuelShell -> Shape1 首次外向逃逸；
+  - 统计裂变碎片首次进入 Shape3 和 Shape4；
+  - 使用 track ID 在事件内去重，避免同一碎片重复计数。
+
+- `EventAction.cc`
+  - 汇总单事件内的裂变、碎片、逃逸和出口进入统计。
+
+- `RunAction.cc`
+  - 汇总全运行统计；
+  - 输出裂变事件数、总 `nFission` 次数、直接裂变碎片数、多裂变事件数；
+  - 输出燃料壳层外向逃逸数、逃逸能量占比、平均逃逸速度和速度分箱；
+  - 输出 Shape3/Shape4 命中事件数、进入数，以及按 fission event 归一化的命中率；
+  - 在运行开始时关闭 `RadioactiveDecay` 和 `RadioactiveDecayBase`，以聚焦直接裂变碎片输运。这不是完整核素演化模型。
+
+## 数据与脚本
+
+- `data/G4NDL4.6_patched/` 和 `data/G4NDL4.6_overlay/` 保存 Am-242/Am-242m 相关的 NeutronHP 裂变数据补丁或覆盖文件。
+- `scripts/sweep_magnetic_modes.sh` 生成并运行磁场模式扫描宏，比较 `off`、`uniform` 和 `collimation`。
+- `scripts/compare_magnetic_modes.sh` 用于运行磁场模式对比，但当前源码树不再保留默认 `compare_magnetic_modes.mac`，使用前需要自行提供宏文件。
+- `scripts/generate_escape_speed_distribution_table.sh` 用于从运行日志整理逃逸速度分布表；该脚本同样依赖用户提供或恢复宏模板。
+- `scripts/run_am242_ffproxy.sh` 会构造 Am-242/Am-242m 裂变碎片代理数据，仅适合代码路径验证；当前源码树不再保留其默认验证宏，使用时应显式传入宏文件路径。
+
+注意：当前工作区的 B1 目录主要保留源码、数据和脚本，不再保留历史构建目录、历史运行宏和历史结果表。`CMakeLists.txt` 只复制当前仍存在的运行辅助文件，不再依赖已删除宏文件。
+
+## 常用环境变量
+
+- `FFRE_FIELD_MODE=off|uniform|collimation`
+  - 选择磁场模式。未设置时默认使用 `collimation`。
+- `FFRE_ENABLE_COLLIMATION_FIELD=false`
+  - 关闭磁场。
+- `FFRE_B0_T`
+  - 设置基准磁场强度，默认 1.5 T。
+- `FFRE_GRADB_T_PER_M`
+  - 设置准直场梯度，默认 -0.04 T/m。
+- `FFRE_SPLIT_ANGLE_DEG`
+  - 设置出口分叉导向角，默认 10 deg。
+- `FFRE_PRINT_EVENT_SUMMARY=0`
+  - 关闭逐事件摘要，适合大样本运行。
+- `FFRE_SINGLE_FUEL_PARTICLE_VIEW=1`
+  - 单颗粒可视化检查模式，不用于输运统计结论。
+- `FFRE_GEOMETRY_VIS_VIEW=1`
+  - 几何可视化检查模式。
+
+## 构建与运行
+
+典型构建流程如下，前提是本机 Geant4、数据集和编译环境已经正确配置：
+
+```bash
+cd B1
+cmake -S . -B build
+cmake --build build
+```
+
+批处理运行通常采用宏文件：
+
+```bash
+./build/exampleB1 path/to/run.mac
+```
+
+当前源码树不内置论文扫描用批处理宏。新的运行者需要自行准备宏文件，最小示例为：
+
+```text
+/run/initialize
+/gps/particle neutron
+/gps/pos/type Point
+/gps/pos/centre 0 0 0 m
+/gps/ang/type iso
+/gps/ene/type Mono
+/gps/ene/mono 0.0253 eV
+/run/beamOn 10000
+```
+
+磁场扫描脚本会在 `build/macros/generated/` 下生成自己的扫描宏，但仍依赖 `build/exampleB1` 已存在：
+
+```bash
+cd B1
+./scripts/sweep_magnetic_modes.sh
+```
+
+其余脚本如 `compare_magnetic_modes.sh` 和 `generate_escape_speed_distribution_table.sh` 需要宏模板，当前仓库未保留默认模板，使用前应先准备相应宏文件。
+
+## 结果如何解释
+
+运行结束时的核心输出块为 `Fission Transport Summary`。其中：
+
+- `Fission events` 的分母是 primary event 数；
+- `Outward fuel-coating escapes` 的百分比以直接裂变碎片数为分母；
+- `Shape3 hit events` 和 `Shape4 hit events` 的第一组百分比以 primary event 数为分母；
+- `Shape3 hit rate among fission evts` 和 `Shape4 hit rate among fission evts` 以 fission event 数为分母；
+- `Outward coating escape speed` 是 FuelShell -> Shape1 首次外向逃逸碎片的平均速度。
+
+这些输出可以用于论文中的输运统计、出口接受率对比和推进性能的初步后处理估算。它们不能直接写成反应堆临界性能、工程推力、完整比冲或总体飞行器性能。
+
+## 模型边界
+
+当前模型明确不处理以下内容：
+
+- 完整临界计算和燃耗演化；
+- 完整裂变产物谱的高保真产额验证；
+- 放射性衰变链对后续输运的贡献；
+- 燃料床热工水力、空间电荷中和和等离子体集体效应；
+- 磁体结构、线圈功耗和冷却系统工程设计；
+- 出口后的完整喷管膨胀和飞行器总体质量闭合。
+
+因此，B1 的结论应写作“当前几何、源项和磁场参数条件下的 Geant4 初步输运统计结果”。

@@ -1,0 +1,158 @@
+# B2: H2 工质/后燃器耦合探索模型
+
+本目录是在 B1 主模型基础上的探索性扩展。它保留 Am-242m 涂层燃料颗粒、直接裂变碎片逃逸、磁场准直和 Shape3/Shape4 出口统计，同时加入可选的 Shape1 氢气填充和 H2 区域能量/动量统计，用于评估后燃器或轻质工质耦合问题的初步建模接口。
+
+B2 不是已经完成的后燃器工程设计，也不能把裂变碎片对 H2 的能量沉积直接等同于完整气体加热、喷管膨胀或推力增益。
+
+## 与 B1 的关系
+
+B2 继承 B1 的核心输运框架：
+
+- Shape1 活动燃料区；
+- 石墨内核 + Am-242m 微米级燃料壳层；
+- BeO 外围结构和 Shape3/Shape4 弯曲出口；
+- `off`、`uniform`、`collimation` 三种磁场模式；
+- `nFission` 直接裂变碎片识别；
+- FuelShell -> Shape1 首次外向逃逸统计；
+- Shape3/Shape4 首次进入统计；
+- 运行开始时关闭放射性衰变过程，以聚焦直接裂变碎片输运。
+
+B2 的新增内容是：Shape1 可由真空改为 H2 气体，并统计裂变碎片在该区域中的进入、离开、能量沉积和轴向动量变化。
+
+## 当前代码实现
+
+主要实现位于 `src/` 和 `include/`：
+
+- `DetectorConstruction.cc`
+  - 通过 `FFRE_FILL_SHAPE1_H2` 控制是否将 Shape1 填充为 `FFRE_H2Gas`；
+  - H2 默认温度为 300 K，默认压力为 1 atm；
+  - 可通过环境变量指定 H2 温度、压力或密度；
+  - 若未指定密度，代码按理想气体关系由压力和温度估算 H2 密度；
+  - 其他几何、Am-242m 燃料颗粒、BeO 结构和磁场设置与 B1 基本一致。
+
+- `SteppingAction.cc`
+  - 继续统计直接裂变碎片、燃料壳层外向逃逸和 Shape3/Shape4 进入；
+  - 新增 Shape1 区域的裂变碎片进入/离开统计；
+  - 新增 H2 区域内裂变碎片能量沉积统计；
+  - 新增进入/离开 Shape1 时的有符号轴向动量 `pz`、离开速度、离开动能和 `cos(theta_z)` 统计。
+
+- `EventAction.cc`
+  - 汇总每个事件内的 H2 能量沉积、进入数、离开数、动量和出口方向统计。
+
+- `RunAction.cc`
+  - 输出继承自 B1 的 `Fission Transport Summary`；
+  - 额外输出 `Fuel-Bed Transport / H2 Summary`，包括：
+    - H2 是否启用；
+    - H2 压力、温度和密度；
+    - H2-active events；
+    - H2 fragment entries / exits；
+    - H2 deposited fragment energy；
+    - H2 signed pz in / out；
+    - H2 signed pz retention；
+    - H2 exit mean kinetic energy；
+    - H2 exit speed；
+    - H2 exit mean cos(theta_z)。
+
+- `scripts/compute_h2_startup_performance.py`
+  - 从无 H2 和有 H2 两份运行日志中提取统计量；
+  - 按简化热效率、H2 质量流量、喷管效率等假设估算启动阶段的工质加热和推力变化；
+  - 该脚本输出是后处理估算，不是自洽喷管或系统级性能计算。
+
+注意：当前工作区的 B2 目录主要保留源码、数据和脚本，不再保留历史构建目录、历史运行宏和历史结果表。`CMakeLists.txt` 只复制当前仍存在的运行辅助文件，不再依赖已删除宏文件。
+
+## 常用环境变量
+
+继承自 B1 的磁场和输出控制：
+
+- `FFRE_FIELD_MODE=off|uniform|collimation`
+- `FFRE_ENABLE_COLLIMATION_FIELD=false`
+- `FFRE_B0_T`
+- `FFRE_GRADB_T_PER_M`
+- `FFRE_SPLIT_ANGLE_DEG`
+- `FFRE_PRINT_EVENT_SUMMARY=0`
+
+B2 新增 H2 控制：
+
+- `FFRE_FILL_SHAPE1_H2=true`
+  - 将 Shape1 填充为 H2 气体。未设置时 Shape1 保持真空。
+- `FFRE_H2_TEMPERATURE_K`
+  - 设置 H2 温度，默认 300 K。
+- `FFRE_H2_PRESSURE_ATM`
+  - 设置 H2 压力，默认 1 atm。
+- `FFRE_H2_DENSITY_KG_M3`
+  - 直接指定 H2 密度。若该值大于 0，则优先使用该密度，不再由理想气体关系估算。
+
+## 构建与运行
+
+典型构建流程：
+
+```bash
+cd B2
+cmake -S . -B build
+cmake --build build
+```
+
+无 H2 基准运行示例：
+
+```bash
+FFRE_FIELD_MODE=collimation \
+FFRE_PRINT_EVENT_SUMMARY=0 \
+./build/exampleB1 path/to/run.mac > build/logs/baseline_no_h2.log
+```
+
+当前源码树不内置论文扫描用批处理宏。`path/to/run.mac` 需要由运行者自行准备，其 GPS 设置方式与 B1 相同，可使用热中子点源或其他明确记录的源项设置。
+
+Shape1 填充 H2 运行示例：
+
+```bash
+FFRE_FIELD_MODE=collimation \
+FFRE_FILL_SHAPE1_H2=true \
+FFRE_H2_PRESSURE_ATM=1 \
+FFRE_H2_TEMPERATURE_K=300 \
+FFRE_PRINT_EVENT_SUMMARY=0 \
+./build/exampleB1 path/to/run.mac > build/logs/shape1_h2.log
+```
+
+后处理估算示例：
+
+```bash
+python3 scripts/compute_h2_startup_performance.py \
+  build/logs/baseline_no_h2.log \
+  build/logs/shape1_h2.log \
+  --fission-power-mw 1 \
+  --mdot-h2-g-s 1 5 10
+```
+
+## 结果如何解释
+
+B2 输出分为两类。
+
+第一类是继承自 B1 的裂变碎片输运统计：
+
+- fission event 数；
+- 直接裂变碎片数；
+- FuelShell -> Shape1 外向逃逸数、能量和速度；
+- Shape3/Shape4 出口进入事件数和按 fission event 归一化的命中率。
+
+第二类是 B2 新增的 H2 区域统计：
+
+- `H2-active events` 表示有 H2 区域能量沉积、进入或离开事件的 primary 数；
+- `H2 fragment entries / exits` 是裂变碎片进入/离开 Shape1 区域的计数；
+- `H2 deposited fragment energy` 是裂变碎片在 Shape1/H2 区域内沉积的能量；
+- `H2 signed pz retention` 是出口前后有符号轴向动量的比值；
+- `H2 exit mean cos(theta_z)` 描述离开 Shape1 时动量相对 z 轴的平均方向性。
+
+这些统计量可以用于比较“无 H2”和“有 H2 填充”时裂变碎片输运与能量沉积的变化。它们不能直接写成完整气体温升、完整喷管推力或最终推进器性能。
+
+## 模型边界
+
+B2 当前没有显式求解：
+
+- H2 的真实流动、压缩、膨胀和喷管加速；
+- H2 的电离、复合、辐射输运和非平衡化学；
+- 裂变碎片能量沉积后的瞬态热工水力响应；
+- 空间电荷中和、等离子体集体效应和电磁场自洽反馈；
+- 线圈功耗、结构质量和系统级热管理；
+- 反应堆临界、燃耗和完整核素演化。
+
+因此，B2 适合作为“后燃器及工质耦合问题的初步接口”或“后续工作模型基础”，不应与 B1 主方案结果混为同一层级的最终设计结论。

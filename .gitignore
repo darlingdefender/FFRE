@@ -1,0 +1,38 @@
+# Build products
+build/
+build-*/
+build-codex/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Local executables and run output
+exampleB1
+exampleB1.out
+*.log
+*.csv
+*.xlsx
+*.tex
+
+# Geant4 visualization/history artifacts
+G4History.macro
+g4_*.prim
+g4*.eps
+g4*.wrl
+.DAWN_*
+
+# Editor and Python cache files
+.vscode/
+__pycache__/
+*.py[cod]
+
+# Legacy local notes copied from Geant4 examples
+.README.txt
+History
+GNUmakefile
+.codex
+
+# Local assistant instructions
+AGENTS.md
